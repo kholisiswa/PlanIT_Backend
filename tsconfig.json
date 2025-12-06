@@ -22,7 +22,8 @@
   "include": [
     "server/**/*",
     "shared/**/*",
-    "drizzle/**/*"
+    "drizzle/**/*",
+    "api/**/*"
   ],
 
   "exclude": ["node_modules", "dist"],
