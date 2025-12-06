@@ -4,7 +4,7 @@ import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
 import { getSessionCookieOptions } from "./cookies";
-import { SignJWT, jwtVerify } from "jose";
+import jwt from "jsonwebtoken";
 import type { User } from "../../drizzle/schema";
 import { getUserByOpenId, upsertUser } from "../db";
 import { ENV } from "./env";
@@ -122,11 +122,6 @@ class SDKServer {
     return new Map(Object.entries(parsed));
   }
 
-  private getSessionSecret() {
-    const secret = ENV.cookieSecret || "default_secret";
-    return new TextEncoder().encode(secret);
-  }
-
   async createSessionToken(
     openId: string,
     options: { expiresInMs?: number; name?: string } = {}
@@ -142,34 +137,29 @@ class SDKServer {
   }
 
   async signSession(payload: SessionPayload, options: { expiresInMs?: number } = {}): Promise<string> {
-    const issuedAt = Date.now();
     const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
-    const secretKey = this.getSessionSecret();
-
-    return new SignJWT({
-      openId: payload.openId,
-      appId: payload.appId,
-      name: payload.name,
-    })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setExpirationTime(expirationSeconds)
-      .sign(secretKey);
+    const expiresInSeconds = Math.floor(expiresInMs / 1000);
+    return jwt.sign(
+      {
+        openId: payload.openId,
+        appId: payload.appId,
+        name: payload.name,
+      },
+      ENV.cookieSecret || "default_secret",
+      { expiresIn: expiresInSeconds }
+    );
   }
 
-  async verifySession(cookieValue: string | undefined | null) {
+  async verifySession(cookieValue: string | undefined | null) { 
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
     }
 
     try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, {
-        algorithms: ["HS256"],
-      });
+     const payload = jwt.verify(cookieValue, ENV.cookieSecret || "default_secret") as any;
 
-      const { openId, appId, name } = payload as any;
+      const { openId, appId, name } = payload;
 
       if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
         console.warn("[Auth] Session payload missing fields");

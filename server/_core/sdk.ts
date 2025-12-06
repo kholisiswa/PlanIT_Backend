@@ -3,7 +3,7 @@ import { ForbiddenError } from "../../shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
-import { SignJWT, jwtVerify } from "jose";
+import jwt from "jsonwebtoken";
 import type { User } from "../../drizzle/schema";
 import { getUserByOpenId, upsertUser } from "../db";
 import { ENV } from "./env";
@@ -25,9 +25,9 @@ export type SessionPayload = {
   name: string;
 };
 
-const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
-const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
-const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
+const EXCHANGE_TOKEN_PATH = "/webdev.v1.WebDevAuthPublicService/ExchangeToken";
+const GET_USER_INFO_PATH = "/webdev.v1.WebDevAuthPublicService/GetUserInfo";
+const GET_USER_INFO_WITH_JWT_PATH = "/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt";
 
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
@@ -133,11 +133,6 @@ class SDKServer {
     return new Map(Object.entries(parsed));
   }
 
-  private getSessionSecret() {
-    const secret = ENV.cookieSecret;
-    return new TextEncoder().encode(secret);
-  }
-
   /**
    * Create a session token for a Manus user openId
    * @example
@@ -158,19 +153,17 @@ class SDKServer {
   }
 
   async signSession(payload: SessionPayload, options: { expiresInMs?: number } = {}): Promise<string> {
-    const issuedAt = Date.now();
     const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
-    const secretKey = this.getSessionSecret();
-
-    return new SignJWT({
-      openId: payload.openId,
-      appId: payload.appId,
-      name: payload.name,
-    })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setExpirationTime(expirationSeconds)
-      .sign(secretKey);
+    const expiresInSeconds = Math.floor(expiresInMs / 1000);
+    return jwt.sign(
+      {
+        openId: payload.openId,
+        appId: payload.appId,
+        name: payload.name,
+      },
+      ENV.cookieSecret || "default_secret",
+      { expiresIn: expiresInSeconds }
+    );
   }
 
   async verifySession(
@@ -182,11 +175,11 @@ class SDKServer {
     }
 
     try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, {
-        algorithms: ["HS256"],
-      });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const payload = jwt.verify(cookieValue, ENV.cookieSecret || "default_secret") as Record<
+        string,
+        unknown
+      >;
+      const { openId, appId, name } = payload;
 
       if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
         console.warn("[Auth] Session payload missing required fields");
