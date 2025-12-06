@@ -23,7 +23,8 @@
     "server/**/*",
     "shared/**/*",
     "drizzle/**/*",
-    "api/**/*"
+    "api/**/*",
+    "index.ts"
   ],
 
   "exclude": ["node_modules", "dist"],
