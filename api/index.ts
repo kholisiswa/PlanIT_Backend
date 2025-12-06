@@ -1,6 +1,5 @@
 // Vercel Serverless entrypoint for the Express + tRPC backend
 import "dotenv/config";
-import "tsconfig-paths/register";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createApp } from "../server/_core/app";
 
