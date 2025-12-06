@@ -28,10 +28,11 @@ export async function createContext(
   // -------------------------------
   // UNIVERSAL TOKEN EXTRACTION
   // -------------------------------
+  const r: any = req;
   const token =
-    req.cookies?.app_session_id ||
-    req.headers["x-session-token"] ||
-    req.headers["authorization"]?.replace("Bearer ", "") ||
+    r.cookies?.app_session_id ||
+    r.headers?.["x-session-token"] ||
+    r.headers?.["authorization"]?.replace("Bearer ", "") ||
     null;
 
   if (token) {

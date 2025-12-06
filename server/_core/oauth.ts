@@ -256,10 +256,10 @@ class SDKServer {
 
 export const sdk = new SDKServer();
 
-export function registerOAuthRoutes(app: Express) {
-  app.get("/api/oauth/callback", async (req: Request, res: Response) => {
-    const code = typeof req.query.code === "string" ? req.query.code : undefined;
-    const state = typeof req.query.state === "string" ? req.query.state : undefined;
+export function registerOAuthRoutes(app: Express | any) {
+  app.get("/api/oauth/callback", async (req: Request | any, res: Response | any) => {
+    const code = typeof req.query?.code === "string" ? req.query.code : undefined;
+    const state = typeof req.query?.state === "string" ? req.query.state : undefined;
 
     if (!code || !state) {
       res.status(400).json({ error: "code and state are required" });
