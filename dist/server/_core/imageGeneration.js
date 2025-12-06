@@ -1,0 +1,60 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.generateImage = generateImage;
+/**
+ * Image generation helper using internal ImageService
+ *
+ * Example usage:
+ *   const { url: imageUrl } = await generateImage({
+ *     prompt: "A serene landscape with mountains"
+ *   });
+ *
+ * For editing:
+ *   const { url: imageUrl } = await generateImage({
+ *     prompt: "Add a rainbow to this landscape",
+ *     originalImages: [{
+ *       url: "https://example.com/original.jpg",
+ *       mimeType: "image/jpeg"
+ *     }]
+ *   });
+ */
+const storage_1 = require("server/storage");
+const env_1 = require("./env");
+async function generateImage(options) {
+    if (!env_1.ENV.forgeApiUrl) {
+        throw new Error("BUILT_IN_FORGE_API_URL is not configured");
+    }
+    if (!env_1.ENV.forgeApiKey) {
+        throw new Error("BUILT_IN_FORGE_API_KEY is not configured");
+    }
+    // Build the full URL by appending the service path to the base URL
+    const baseUrl = env_1.ENV.forgeApiUrl.endsWith("/")
+        ? env_1.ENV.forgeApiUrl
+        : `${env_1.ENV.forgeApiUrl}/`;
+    const fullUrl = new URL("images.v1.ImageService/GenerateImage", baseUrl).toString();
+    const response = await fetch(fullUrl, {
+        method: "POST",
+        headers: {
+            accept: "application/json",
+            "content-type": "application/json",
+            "connect-protocol-version": "1",
+            authorization: `Bearer ${env_1.ENV.forgeApiKey}`,
+        },
+        body: JSON.stringify({
+            prompt: options.prompt,
+            original_images: options.originalImages || [],
+        }),
+    });
+    if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`Image generation request failed (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`);
+    }
+    const result = (await response.json());
+    const base64Data = result.image.b64Json;
+    const buffer = Buffer.from(base64Data, "base64");
+    // Save to S3
+    const { url } = await (0, storage_1.storagePut)(`generated/${Date.now()}.png`, buffer, result.image.mimeType);
+    return {
+        url,
+    };
+}
