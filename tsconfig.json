@@ -15,6 +15,7 @@
       "@server/*": ["server/*"],
       "@drizzle/*": ["drizzle/*"]
     },
+    "types": ["node", "express"],
 
     "outDir": "dist"
   },
