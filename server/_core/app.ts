@@ -55,5 +55,12 @@ export function createApp() {
     })
   );
 
+  // ⚠️ DEBUGGING: log all errors in Vercel
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("🔥 GLOBAL ERROR:", err);
+  res.status(500).json({ error: err?.message || "Unknown Error" });
+});
+
+
   return app;
 }
