@@ -3,7 +3,15 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { ZodError } from "zod";
 import type { TrpcContext } from "./context";
 
+// Use plain JSON transformer so we avoid superjson (which is ESM-only) in the
+// serverless bundle. Client must match this transformer configuration.
+const jsonTransformer = {
+  serialize: (data: unknown) => data,
+  deserialize: (data: unknown) => data,
+};
+
 const t = initTRPC.context<TrpcContext>().create({
+  transformer: jsonTransformer,
   errorFormatter({ shape, error }) {
     return {
       ...shape,
