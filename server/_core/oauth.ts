@@ -3,6 +3,7 @@ import { ForbiddenError } from "../../shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
+import { serializeSessionCookie } from "./cookies";
 import { getSessionCookieOptions } from "./cookies";
 import jwt from "jsonwebtoken";
 import type { User } from "../../drizzle/schema";
@@ -197,7 +198,8 @@ class SDKServer {
   }
 
   async authenticateRequest(req: Request): Promise<User> {
-    const cookies = this.parseCookies(req.headers.cookie);
+    const headerCookie = (req as any).headers?.cookie ?? (typeof (req as any).get === "function" ? (req as any).get("cookie") : undefined);
+    const cookies = this.parseCookies(headerCookie);
     const sessionCookie = cookies.get(COOKIE_NAME);
     const session = await this.verifySession(sessionCookie);
 
@@ -288,7 +290,7 @@ export function registerOAuthRoutes(app: Express | any) {
       });
 
       // Set cookie and redirect back to the original redirect URI (encoded in state)
-      res.cookie(COOKIE_NAME, sessionToken, getSessionCookieOptions(req));
+      (res as any).setHeader("Set-Cookie", serializeSessionCookie(sessionToken, req as any));
       const redirectTo = (() => {
         try {
           return Buffer.from(state, "base64").toString("utf8");

@@ -4,7 +4,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { COOKIE_NAME } from "../../shared/const";
-import { getSessionCookieOptions } from "./cookies";
+import { getSessionCookieOptions, serializeSessionCookie, serializeClearSessionCookie } from "./cookies";
 import { users } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -57,7 +57,7 @@ export const authRouter = createTRPCRouter({
         expiresIn: "7d",
       });
 
-      ctx.res.cookie(COOKIE_NAME, token, getSessionCookieOptions(ctx.req));
+      (ctx.res as any).setHeader("Set-Cookie", serializeSessionCookie(token, ctx.req as any));
 
       const { password, ...safeUser } = newUser as any;
       return { success: true, user: safeUser };
@@ -95,7 +95,7 @@ export const authRouter = createTRPCRouter({
         expiresIn: "7d",
       });
 
-      ctx.res.cookie(COOKIE_NAME, token, getSessionCookieOptions(ctx.req));
+      (ctx.res as any).setHeader("Set-Cookie", serializeSessionCookie(token, ctx.req as any));
 
       const { password, ...safeUser } = user as any;
       return { success: true, user: safeUser };
@@ -112,10 +112,7 @@ export const authRouter = createTRPCRouter({
   // LOGOUT
   // ===========================
   logout: publicProcedure.mutation(({ ctx }) => {
-    ctx.res.clearCookie(COOKIE_NAME, {
-      ...getSessionCookieOptions(ctx.req),
-      maxAge: 0,
-    });
+    (ctx.res as any).setHeader("Set-Cookie", serializeClearSessionCookie(ctx.req as any));
     return { success: true };
   }),
 
