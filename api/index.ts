@@ -1,5 +1,5 @@
+// api/index.ts
 import "dotenv/config";
-import express from "express";           // ← HARUS ADA
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createApp } from "../server/_core/app";
 
