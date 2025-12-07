@@ -3,12 +3,10 @@
     "target": "ES2020",
     "module": "CommonJS",
     "moduleResolution": "node",
-
     "esModuleInterop": true,
     "strict": false,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["shared/*"],
@@ -16,23 +14,8 @@
       "@drizzle/*": ["drizzle/*"]
     },
     "types": ["node", "express"],
-
     "outDir": "dist"
   },
-
-  "include": [
-    "server/**/*",
-    "shared/**/*",
-    "drizzle/**/*",
-    "api/**/*",
-    "index.ts"
-  ],
-
-  "exclude": ["node_modules", "dist"],
-
-  "ts-node": {
-    "compilerOptions": {
-      "module": "CommonJS"
-    }
-  }
+  "include": ["server/**/*", "shared/**/*", "drizzle/**/*", "api/**/*", "index.ts"],
+  "exclude": ["node_modules", "dist"]
 }
