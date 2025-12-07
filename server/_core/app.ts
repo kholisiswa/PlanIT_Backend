@@ -19,13 +19,23 @@ export function createApp() {
     .map((o) => o.trim())
     .filter(Boolean);
 
+  // allow exact origins and simple wildcard suffixes like https://myapp.vercel.app*
+  const isOriginAllowed = (origin?: string) => {
+    if (!origin) return true; // allow server-to-server / health checks
+    return allowedOrigins.some((allowed) => {
+      if (allowed.endsWith("*")) {
+        const prefix = allowed.slice(0, -1);
+        return origin.startsWith(prefix);
+      }
+      return origin === allowed;
+    });
+  };
+
   app.use(
     cors({
       credentials: true,
       origin(origin, callback) {
-        // Allow server-to-server / healthcheck calls with no origin
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) return callback(null, true);
+        if (isOriginAllowed(origin)) return callback(null, true);
         console.warn(`[CORS] Blocked origin: ${origin}`);
         return callback(new Error("Not allowed by CORS"));
       },
