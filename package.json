@@ -25,7 +25,7 @@
     "jsonwebtoken": "^9.0.2",
     "postgres": "^3.4.7",
     "resend": "^6.5.2",
-    "superjson": "^2.2.6",
+    "superjson": "^1.13.1",
     "tsconfig-paths": "^4.2.0",
     "zod": "^3.23.8"
   },
