@@ -5,23 +5,21 @@ import cors from "cors";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
-import { createContext } from "./context"; // HANYA PAKAI INI — TIDAK ADA setupVite
+import { createContext } from "./context";
 
 export function createApp() {
   const app = express();
 
-  // Honor reverse proxy headers (Vercel/Supabase), needed for secure cookies
+  // Untuk Vercel proxy (biar cookies secure tidak hilang)
   app.set("trust proxy", 1);
 
-  // FRONTEND VITE = 5173 (default) — override via CORS_ORIGINS for Vercel/Supabase
   const allowedOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:5173")
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean);
 
-  // allow exact origins and simple wildcard suffixes like https://myapp.vercel.app*
   const isOriginAllowed = (origin?: string) => {
-    if (!origin) return true; // allow server-to-server / health checks
+    if (!origin) return true;
     return allowedOrigins.some((allowed) => {
       if (allowed.endsWith("*")) {
         const prefix = allowed.slice(0, -1);
@@ -36,7 +34,7 @@ export function createApp() {
       credentials: true,
       origin(origin, callback) {
         if (isOriginAllowed(origin)) return callback(null, true);
-        console.warn(`[CORS] Blocked origin: ${origin}`);
+        console.warn("[CORS] Blocked:", origin);
         return callback(new Error("Not allowed by CORS"));
       },
     })
@@ -49,7 +47,6 @@ export function createApp() {
 
   app.use(cookieParser());
 
-  // tRPC API
   app.use(
     "/api/trpc",
     createExpressMiddleware({
