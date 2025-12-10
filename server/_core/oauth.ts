@@ -1,10 +1,11 @@
-import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { ForbiddenError } from "@shared/_core/errors";
+import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const";
+import { ForbiddenError } from "../../shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
-import type { Request, Response } from "express";
+import type { Express, Request, Response } from "express";
+import { serializeSessionCookie } from "./cookies";
 import { getSessionCookieOptions } from "./cookies";
-import { SignJWT, jwtVerify } from "jose";
+import jwt from "jsonwebtoken";
 import type { User } from "../../drizzle/schema";
 import { getUserByOpenId, upsertUser } from "../db";
 import { ENV } from "./env";
@@ -32,10 +33,16 @@ const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserI
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
     console.log("[OAuth] Initialized with baseURL:", ENV.oAuthServerUrl);
+
+    if (!ENV.oAuthServerUrl) {
+      console.error(
+        "[OAuth] ERROR: OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL in backend .env"
+      );
+    }
   }
 
   private decodeState(state: string): string {
-    return Buffer.from(state, "base64").toString("utf8");
+    return Buffer.from(state, "base64").toString("utf8"); // FIXED: Node tidak punya 'atob'
   }
 
   async getTokenByCode(code: string, state: string): Promise<ExchangeTokenResponse> {
@@ -46,12 +53,12 @@ class OAuthService {
       redirectUri: this.decodeState(state),
     };
 
-    const { data } = await this.client.post(EXCHANGE_TOKEN_PATH, payload);
+    const { data } = await this.client.post<ExchangeTokenResponse>(EXCHANGE_TOKEN_PATH, payload);
     return data;
   }
 
   async getUserInfoByToken(token: ExchangeTokenResponse): Promise<GetUserInfoResponse> {
-    const { data } = await this.client.post(GET_USER_INFO_PATH, {
+    const { data } = await this.client.post<GetUserInfoResponse>(GET_USER_INFO_PATH, {
       accessToken: token.accessToken,
     });
 
@@ -61,7 +68,7 @@ class OAuthService {
 
 const createOAuthHttpClient = (): AxiosInstance =>
   axios.create({
-    baseURL: ENV.oAuthServerUrl || "http://localhost:3001",
+    baseURL: ENV.oAuthServerUrl || "http://localhost:3001", // DEFAULT agar tidak undefined
     timeout: AXIOS_TIMEOUT_MS,
   });
 
@@ -75,76 +82,94 @@ class SDKServer {
   }
 
   private deriveLoginMethod(platforms: unknown, fallback: string | null | undefined): string | null {
-    if (fallback) return fallback;
-    if (!Array.isArray(platforms)) return null;
-
-    const set = new Set(platforms.filter((p) => typeof p === "string"));
-
+    if (fallback && fallback.length > 0) return fallback;
+    if (!Array.isArray(platforms) || platforms.length === 0) return null;
+    const set = new Set<string>(platforms.filter((p): p is string => typeof p === "string"));
     if (set.has("REGISTERED_PLATFORM_EMAIL")) return "email";
     if (set.has("REGISTERED_PLATFORM_GOOGLE")) return "google";
     if (set.has("REGISTERED_PLATFORM_APPLE")) return "apple";
     if (set.has("REGISTERED_PLATFORM_MICROSOFT")) return "microsoft";
     if (set.has("REGISTERED_PLATFORM_GITHUB")) return "github";
-
-    return Array.from(set)[0]?.toLowerCase() ?? null;
+    const first = Array.from(set)[0];
+    return first ? first.toLowerCase() : null;
   }
 
-  async exchangeCodeForToken(code: string, state: string) {
+  async exchangeCodeForToken(code: string, state: string): Promise<ExchangeTokenResponse> {
     return this.oauthService.getTokenByCode(code, state);
   }
 
-  async getUserInfo(accessToken: string) {
-    const data = await this.oauthService.getUserInfoByToken({ accessToken } as any);
+  async getUserInfo(accessToken: string): Promise<GetUserInfoResponse> {
+    const data = await this.oauthService.getUserInfoByToken({
+      accessToken,
+    } as ExchangeTokenResponse);
 
     const loginMethod = this.deriveLoginMethod(
       (data as any)?.platforms,
-      (data as any)?.platform ?? data.platform,
+      (data as any)?.platform ?? data.platform ?? null
     );
 
-    return { ...(data as any), platform: loginMethod, loginMethod } as GetUserInfoResponse;
+    return {
+      ...(data as any),
+      platform: loginMethod,
+      loginMethod,
+    } as GetUserInfoResponse;
   }
 
   private parseCookies(cookieHeader: string | undefined) {
-    if (!cookieHeader) return new Map();
-    return new Map(Object.entries(parseCookieHeader(cookieHeader)));
+    if (!cookieHeader) {
+      return new Map<string, string>();
+    }
+    const parsed = parseCookieHeader(cookieHeader);
+    return new Map(Object.entries(parsed));
   }
 
-  private getSessionSecret() {
-    return new TextEncoder().encode(ENV.cookieSecret || "default_secret");
-  }
-
-  async createSessionToken(openId: string, options: { expiresInMs?: number; name?: string } = {}) {
+  async createSessionToken(
+    openId: string,
+    options: { expiresInMs?: number; name?: string } = {}
+  ): Promise<string> {
     return this.signSession(
-      { openId, appId: ENV.appId, name: options.name ?? "" },
-      options,
+      {
+        openId,
+        appId: ENV.appId,
+        name: options.name || "",
+      },
+      options
     );
   }
 
-  async signSession(payload: SessionPayload, options: { expiresInMs?: number } = {}) {
-    const issuedAt = Date.now();
+  async signSession(payload: SessionPayload, options: { expiresInMs?: number } = {}): Promise<string> {
     const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
-
-    const secret = this.getSessionSecret();
-
-    return new SignJWT(payload)
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setExpirationTime(expirationSeconds)
-      .sign(secret);
+    const expiresInSeconds = Math.floor(expiresInMs / 1000);
+    return jwt.sign(
+      {
+        openId: payload.openId,
+        appId: payload.appId,
+        name: payload.name,
+      },
+      ENV.cookieSecret || "default_secret",
+      { expiresIn: expiresInSeconds }
+    );
   }
 
-  async verifySession(cookieValue: string | undefined | null) {
-    if (!cookieValue) return null;
+  async verifySession(cookieValue: string | undefined | null) { 
+    if (!cookieValue) {
+      console.warn("[Auth] Missing session cookie");
+      return null;
+    }
 
     try {
-      const secret = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secret, { algorithms: ["HS256"] });
+     const payload = jwt.verify(cookieValue, ENV.cookieSecret || "default_secret") as any;
 
-      const { openId, appId, name } = payload as any;
+      const { openId, appId, name } = payload;
 
-      if (!openId || !appId || !name) return null;
+      if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
+        console.warn("[Auth] Session payload missing fields");
+        return null;
+      }
+
       return { openId, appId, name };
-    } catch {
+    } catch (error) {
+      console.warn("[Auth] Session verification failed:", String(error));
       return null;
     }
   }
@@ -155,188 +180,107 @@ class SDKServer {
       projectId: ENV.appId,
     };
 
-    const { data } = await this.client.post(GET_USER_INFO_WITH_JWT_PATH, payload);
+    const { data } = await this.client.post<GetUserInfoWithJwtResponse>(
+      GET_USER_INFO_WITH_JWT_PATH,
+      payload
+    );
 
     const loginMethod = this.deriveLoginMethod(
       (data as any)?.platforms,
-      (data as any)?.platform ?? data.platform,
+      (data as any)?.platform ?? data.platform ?? null
     );
 
-    return { ...(data as any), platform: loginMethod, loginMethod };
+    return {
+      ...(data as any),
+      platform: loginMethod,
+      loginMethod,
+    } as GetUserInfoWithJwtResponse;
   }
 
-  async authenticateRequest(req: any): Promise<User> {
-    const cookies = this.parseCookies(req.headers.cookie);
+  async authenticateRequest(req: Request): Promise<User> {
+    const headerCookie = (req as any).headers?.cookie ?? (typeof (req as any).get === "function" ? (req as any).get("cookie") : undefined);
+    const cookies = this.parseCookies(headerCookie);
     const sessionCookie = cookies.get(COOKIE_NAME);
-
     const session = await this.verifySession(sessionCookie);
-    if (!session) throw ForbiddenError("Invalid session cookie");
 
-    const openId = session.openId;
-    const now = new Date();
-    let user = await getUserByOpenId(openId);
+    if (!session) {
+      throw ForbiddenError("Invalid session cookie");
+    }
+
+    const sessionUserId = session.openId;
+    const signedInAt = new Date();
+    let user = await getUserByOpenId(sessionUserId);
 
     if (!user) {
-      const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
-      await upsertUser({
-        openId: userInfo.openId,
-        name: userInfo.name ?? "",
-        email: userInfo.email ?? "",
-        loginMethod: userInfo.loginMethod ?? "",
-        lastSignedIn: now,
-        role: "user",
-        password: null,
-      });
-      user = await getUserByOpenId(openId);
+      try {
+        const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+
+        await upsertUser({
+          openId: userInfo.openId,
+          name: userInfo.name ?? "",
+          email: userInfo.email ?? "",
+          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? "",
+          lastSignedIn: signedInAt,
+          role: "user",
+          password: null,
+        });
+
+        user = await getUserByOpenId(userInfo.openId);
+      } catch (e) {
+        console.error("[Auth] Failed to sync user:", e);
+        throw ForbiddenError("Failed to sync user info");
+      }
     }
 
     await upsertUser({
-      ...user,
-      lastSignedIn: now,
+      openId: user.openId ?? null,
+      email: user.email ?? "",
+      name: user.name ?? "",
+      loginMethod: user.loginMethod ?? "",
+      lastSignedIn: signedInAt,
+      role: user.role ?? "user",
+      password: (user as any).password ?? null,
     });
 
-    return user!;
+    return user;
   }
 }
 
 export const sdk = new SDKServer();
 
-/* ROUTES */
-export function registerOAuthRoutes(app: any) {
-
-  /* ---------------- GOOGLE OAUTH ---------------- */
-  app.get("/api/auth/google", async (req: Request, res: Response) => {
-    if (!ENV.googleClientId || !ENV.googleCallbackUrl) {
-      return res.status(500).json({ error: "Google OAuth not configured" });
-    }
-
-    const redirectUri =
-      typeof req.query.redirectUri === "string" ? req.query.redirectUri : "/dashboard";
-
-    const state = Buffer.from(
-      JSON.stringify({
-        redirectUri,
-        nameHint: req.query.nameHint,
-      }),
-    ).toString("base64");
-
-    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    url.searchParams.set("client_id", ENV.googleClientId);
-    url.searchParams.set("redirect_uri", ENV.googleCallbackUrl);
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "openid email profile");
-    url.searchParams.set("state", state);
-    url.searchParams.set("prompt", "select_account");
-
-    res.redirect(url.toString());
-  });
-
-  app.get("/api/auth/google/callback", async (req: Request, res: Response) => {
-    const code = req.query.code as string | undefined;
-    const stateRaw = req.query.state as string | undefined;
-
-    if (!code) return res.status(400).json({ error: "Missing code" });
-
-    try {
-      const tokenRes = await axios.post(
-        "https://oauth2.googleapis.com/token",
-        new URLSearchParams({
-          code,
-          client_id: ENV.googleClientId!,
-          client_secret: ENV.googleClientSecret!,
-          redirect_uri: ENV.googleCallbackUrl!,
-          grant_type: "authorization_code",
-        }),
-        { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
-      );
-
-      const idToken = tokenRes.data?.id_token;
-      if (!idToken) return res.status(400).json({ error: "Missing id_token" });
-
-      const [, payloadPart] = idToken.split(".");
-      const payload = JSON.parse(Buffer.from(payloadPart, "base64").toString("utf8"));
-
-      const sub = payload.sub;
-      const email = payload.email ?? "";
-      const name = payload.name ?? payload.given_name ?? "Google User";
-
-      const openId = `google:${sub}`;
-
-      await upsertUser({
-        openId,
-        email,
-        name,
-        loginMethod: "google",
-        lastSignedIn: new Date(),
-      });
-
-      const sessionToken = await sdk.createSessionToken(openId, {
-        name,
-        expiresInMs: ONE_YEAR_MS,
-      });
-
-      const redirectData = stateRaw
-        ? JSON.parse(Buffer.from(stateRaw, "base64").toString("utf8"))
-        : null;
-
-      res.cookie(COOKIE_NAME, sessionToken, getSessionCookieOptions(req));
-
-      res.redirect(redirectData?.redirectUri ?? "/dashboard");
-    } catch (error: any) {
-      console.error("[OAuth] Google callback error:", error?.response?.data);
-      res.status(500).json({ error: "Google auth failed" });
-    }
-  });
-
-  /* ---------------- DEV LOGIN ---------------- */
-  app.get("/api/oauth/dev-login", async (req: Request, res: Response) => {
-    if (process.env.NODE_ENV === "production") {
-      return res.status(403).json({ error: "dev-login disabled" });
-    }
-
-    const email = (req.query.email as string) ?? "dev@example.com";
-    const name = (req.query.name as string) ?? "Dev User";
-    const redirectUri = (req.query.redirectUri as string) ?? "/";
-
-    const openId = `dev:${email}`;
-
-    await upsertUser({
-      openId,
-      email,
-      name,
-      loginMethod: "dev",
-      lastSignedIn: new Date(),
-      role: "user",
-    });
-
-    const sessionToken = await sdk.createSessionToken(openId, {
-      name,
-      expiresInMs: ONE_YEAR_MS,
-    });
-
-    res.cookie(COOKIE_NAME, sessionToken, getSessionCookieOptions(req));
-    res.redirect(redirectUri);
-  });
-
-  /* ---------------- PLANIT PORTAL OAUTH ---------------- */
-  app.get("/api/oauth/callback", async (req: any, res: any) => {
-    const code = req.query.code;
-    const state = req.query.state;
+export function registerOAuthRoutes(app: Express | any) {
+  app.get("/api/oauth/callback", async (req: Request | any, res: Response | any) => {
+    const code = typeof req.query?.code === "string" ? req.query.code : undefined;
+    const state = typeof req.query?.state === "string" ? req.query.state : undefined;
 
     if (!code || !state) {
-      return res.status(400).json({ error: "code and state required" });
+      res.status(400).json({ error: "code and state are required" });
+      return;
     }
 
     try {
-      const tokenRes = await sdk.exchangeCodeForToken(code, state);
+      const tokenResponse = await sdk.exchangeCodeForToken(code, state);
 
-      const userInfo = await sdk.getUserInfo(tokenRes.accessToken);
+      if (!tokenResponse || !tokenResponse.accessToken) {
+        console.error("[OAuth] No access token returned from exchangeCodeForToken", { tokenResponse });
+        res.status(400).json({ error: "failed to obtain access token" });
+        return;
+      }
 
+      const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
+
+      if (!userInfo || !userInfo.openId) {
+        console.error("[OAuth] openId missing from user info", { userInfo });
+        res.status(400).json({ error: "openId missing from user info" });
+        return;
+      }
+
+      // Persist user (use empty strings where DB expects non-null strings)
       await upsertUser({
         openId: userInfo.openId,
         name: userInfo.name ?? "",
         email: userInfo.email ?? "",
-        loginMethod: userInfo.loginMethod ?? "",
+        loginMethod: userInfo.loginMethod ?? userInfo.platform ?? "",
         lastSignedIn: new Date(),
       });
 
@@ -345,12 +289,19 @@ export function registerOAuthRoutes(app: any) {
         expiresInMs: ONE_YEAR_MS,
       });
 
-      const redirectTo = Buffer.from(state, "base64").toString("utf8");
+      // Set cookie and redirect back to the original redirect URI (encoded in state)
+      (res as any).setHeader("Set-Cookie", serializeSessionCookie(sessionToken, req as any));
+      const redirectTo = (() => {
+        try {
+          return Buffer.from(state, "base64").toString("utf8");
+        } catch (e) {
+          return "/";
+        }
+      })();
 
-      res.cookie(COOKIE_NAME, sessionToken, getSessionCookieOptions(req));
       res.redirect(redirectTo || "/");
     } catch (e) {
-      console.error("[OAuth] portal callback error", e);
+      console.error("[OAuth] callback handler error", e);
       res.status(500).json({ error: "internal error" });
     }
   });
