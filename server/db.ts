@@ -63,27 +63,6 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     role: user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : undefined),
   };
 
-  // Jika email sudah ada (misal user register manual lalu login Google),
-  // perbarui baris lama dan tambahkan openId ke baris tersebut.
-  if (values.email) {
-    const existingByEmail = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, values.email))
-      .limit(1);
-
-    if (existingByEmail[0]) {
-      await db
-        .update(users)
-        .set({
-          ...updateSet,
-          openId: values.openId,
-        })
-        .where(eq(users.id, existingByEmail[0].id));
-      return;
-    }
-  }
-
   await db
     .insert(users)
     .values(values)
