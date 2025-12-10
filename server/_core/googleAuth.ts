@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Application } from "express";
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import { randomBytes } from "crypto";
@@ -203,6 +203,6 @@ router.get("/api/auth/google/callback", async (req, res) => {
   }
 });
 
-export function registerGoogleAuthRoutes(app: express.Express) {
+export function registerGoogleAuthRoutes(app: Application) {
   app.use(router);
 }
