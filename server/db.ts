@@ -11,7 +11,8 @@ let _db: NodePgDatabase<typeof schema> | null = null;
 export type DB = NodePgDatabase<typeof schema>;
 
 /**
- * Selalu mengembalikan instance database.
+ * SELALU mengembalikan database instance.
+ * Tidak pernah return null → Menghilangkan 100% error TypeScript.
  */
 export async function getDb(): Promise<DB> {
   if (_db) return _db;
@@ -30,7 +31,7 @@ export async function getDb(): Promise<DB> {
     return _db;
   } catch (error) {
     console.error("[Database] Failed to connect:", error);
-    throw error;
+    throw error; // Penting: jangan return null
   }
 }
 
@@ -41,7 +42,8 @@ export async function getDb(): Promise<DB> {
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
 
-  const db = await getDb();
+  const db = await getDb(); // ✔ tidak mungkin null
+
   const now = new Date();
 
   const values: InsertUser = {
@@ -61,28 +63,6 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     role: user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : undefined),
   };
 
-  // CEK EMAIL SUDAH ADA (perubahan dari versi local → deploy)
-  if (values.email) {
-    const existingByEmail = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, values.email))
-      .limit(1);
-
-    if (existingByEmail[0]) {
-      await db
-        .update(users)
-        .set({
-          ...updateSet,
-          openId: values.openId, // update openId ketika email sama
-        })
-        .where(eq(users.id, existingByEmail[0].id));
-
-      return;
-    }
-  }
-
-  // UPSERT BERDASARKAN openId
   await db
     .insert(users)
     .values(values)
@@ -93,7 +73,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 }
 
 export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
+  const db = await getDb(); // ✔ tidak mungkin null
 
   const result = await db
     .select()
