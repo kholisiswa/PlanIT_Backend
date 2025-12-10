@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
-import { registerGoogleAuthRoutes } from "./googleAuth";
+import { googleAuthRouter } from "./googleAuth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { isOriginAllowed } from "./cors";
@@ -27,7 +27,7 @@ export function createApp() {
   app.use(cookieParser());
 
   registerOAuthRoutes(app);
-  registerGoogleAuthRoutes(app);
+  app.use(googleAuthRouter);
 
   app.use("/api/trpc", createExpressMiddleware({
     router: appRouter,
