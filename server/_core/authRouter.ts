@@ -39,7 +39,7 @@ export const authRouter = createTRPCRouter({
         .limit(1);
 
       if (existing) {
-        throw new TRPCError({ code: "CONFLICT", message: "Email already in use" });
+        throw new TRPCError({ code: "CONFLICT", message: "Email sudah digunakan" });
       }
 
       const hashed = await bcrypt.hash(input.password, 12);
@@ -85,11 +85,11 @@ export const authRouter = createTRPCRouter({
         .limit(1);
 
       if (!user || !user.password) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password" });
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Email atau kata sandi tidak valid" });
       }
 
       const valid = await bcrypt.compare(input.password, user.password);
-      if (!valid) throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password" });
+      if (!valid) throw new TRPCError({ code: "UNAUTHORIZED", message: "Email atau kata sandi tidak valid" });
 
       const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
         expiresIn: "7d",
