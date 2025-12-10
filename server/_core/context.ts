@@ -5,86 +5,65 @@ import type { User } from "../../drizzle/schema";
 import type { DB } from "../db";
 
 import jwt from "jsonwebtoken";
-import { jwtVerify } from "jose";
 import { getDb } from "../db";
 
 export type TrpcContext = {
-  req: any; // biarkan any (menghindari bentrok adapter)
-  res: any;
+  req: CreateExpressContextOptions["req"];
+  res: CreateExpressContextOptions["res"];
   user: User | null;
-  db: DB;
+  db: DB | null;
 };
 
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
-  const req = opts.req as any;
-  const res = opts.res as any;
+  const { req, res } = opts;
 
-  // DB init
-  const db = await getDb();
-  if (!db) throw new Error("Database not initialized");
+  try {
+    // ❗ DB INIT — always wrap this
+    const db = await getDb();
+    if (!db) {
+      console.error("🔥 CONTEXT ERROR: DB not initialized");
+      return { req, res, db: null, user: null };
+    }
 
-  let user: User | null = null;
+    let user: User | null = null;
 
-  // ----------------------------------
-  // UNIVERSAL TOKEN EXTRACTION
-  // ----------------------------------
-  const token =
-    req.cookies?.app_session_id ||
-    req.headers["x-session-token"] ||
-    req.headers["authorization"]?.replace("Bearer ", "") ||
-    null;
+    // ================================
+    // UNIVERSAL TOKEN EXTRACTION
+    // ================================
+    const r: any = req;
 
-  if (token) {
-    const secret = process.env.JWT_SECRET || "change-me";
+    const token =
+      r.cookies?.app_session_id ||
+      r.headers?.["x-session-token"] ||
+      r.headers?.["authorization"]?.replace("Bearer ", "") ||
+      null;
 
-    //
-    // 1) Coba format lama (JWT email/password yang berisi { id })
-    //
-    if (!user) {
+    if (token) {
       try {
-        const decoded = jwt.verify(token, secret) as { id?: number };
-        if (decoded?.id) {
+        if (!process.env.JWT_SECRET) {
+          console.error("🔥 CONTEXT ERROR: Missing JWT_SECRET");
+        } else {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET) as {
+            id: number;
+          };
+
           const found = await db.query.users.findFirst({
-            where: (tbl, { eq }) => eq(tbl.id, decoded.id!),
+            where: (tbl, { eq }) => eq(tbl.id, decoded.id),
           });
+
           user = found ?? null;
         }
-      } catch {
-        // bukan token lama, lanjut
+      } catch (err) {
+        console.error("🔥 JWT DECODE ERROR:", err);
+        user = null;
       }
     }
 
-    //
-    // 2) Coba sesi OAuth (JOSE HS256 yang berisi { openId, appId, name })
-    //
-    if (!user) {
-      try {
-        const { payload } = await jwtVerify(
-          token,
-          new TextEncoder().encode(secret),
-          { algorithms: ["HS256"] }
-        );
-
-        const openId = (payload as any)?.openId as string | undefined;
-
-        if (openId) {
-          const found = await db.query.users.findFirst({
-            where: (tbl, { eq }) => eq(tbl.openId, openId),
-          });
-          user = found ?? null;
-        }
-      } catch {
-        // bukan token OAuth juga
-      }
-    }
+    return { req, res, user, db };
+  } catch (err) {
+    console.error("🔥 GLOBAL CONTEXT ERROR:", err);
+    return { req, res, db: null, user: null };
   }
-
-  return {
-    req,
-    res,
-    user,
-    db,
-  };
 }
