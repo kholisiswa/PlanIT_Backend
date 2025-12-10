@@ -1,4 +1,4 @@
-import express, { type Application } from "express";
+import express from "express";
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import { randomBytes } from "crypto";
@@ -45,6 +45,8 @@ function getSafeRedirectUri(uri?: string | null) {
 }
 
 const router = express.Router();
+
+export const googleAuthRouter = router;
 
 router.get("/api/auth/google", (req, res) => {
   if (!CLIENT_ID || !CLIENT_SECRET || !CALLBACK_URL) {
@@ -202,7 +204,3 @@ router.get("/api/auth/google/callback", async (req, res) => {
     res.status(500).json({ error: "Failed to sign in with Google" });
   }
 });
-
-export function registerGoogleAuthRoutes(app: Application) {
-  app.use(router);
-}
