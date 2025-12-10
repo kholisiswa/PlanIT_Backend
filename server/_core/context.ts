@@ -1,8 +1,10 @@
+// _core/context.ts
+
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import type { DB } from "../db";
+
 import jwt from "jsonwebtoken";
-import { jwtVerify } from "jose";
 import { getDb } from "../db";
 
 export type TrpcContext = {
@@ -18,10 +20,18 @@ export async function createContext(
   const { req, res } = opts;
 
   try {
+    // ❗ DB INIT — always wrap this
     const db = await getDb();
-    if (!db) return { req, res, db: null, user: null };
+    if (!db) {
+      console.error("🔥 CONTEXT ERROR: DB not initialized");
+      return { req, res, db: null, user: null };
+    }
 
     let user: User | null = null;
+
+    // ================================
+    // UNIVERSAL TOKEN EXTRACTION
+    // ================================
     const r: any = req;
 
     const token =
@@ -31,41 +41,23 @@ export async function createContext(
       null;
 
     if (token) {
-      const secret = process.env.JWT_SECRET || "change-me";
+      try {
+        if (!process.env.JWT_SECRET) {
+          console.error("🔥 CONTEXT ERROR: Missing JWT_SECRET");
+        } else {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET) as {
+            id: number;
+          };
 
-      // 1) JWT lama dengan payload { id }
-      if (!user) {
-        try {
-          const decoded = jwt.verify(token, secret) as { id?: number };
-          if (decoded?.id) {
-            const found = await db.query.users.findFirst({
-              where: (tbl, { eq }) => eq(tbl.id, decoded.id!),
-            });
-            user = found ?? null;
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+          const found = await db.query.users.findFirst({
+            where: (tbl, { eq }) => eq(tbl.id, decoded.id),
+          });
 
-      // 2) Sesi OAuth (HS256 jose) dengan payload { openId }
-      if (!user) {
-        try {
-          const { payload } = await jwtVerify(
-            token,
-            new TextEncoder().encode(secret),
-            { algorithms: ["HS256"] }
-          );
-          const openId = (payload as any)?.openId as string | undefined;
-          if (openId) {
-            const found = await db.query.users.findFirst({
-              where: (tbl, { eq }) => eq(tbl.openId, openId),
-            });
-            user = found ?? null;
-          }
-        } catch {
-          /* ignore */
+          user = found ?? null;
         }
+      } catch (err) {
+        console.error("🔥 JWT DECODE ERROR:", err);
+        user = null;
       }
     }
 
