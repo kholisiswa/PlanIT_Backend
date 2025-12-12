@@ -9,6 +9,10 @@ export const notificationRouter = createTRPCRouter({
   // GET USER NOTIFICATION SETTINGS
   // ----------------------------------------------------
   get: protectedProcedure.query(async ({ ctx }) => {
+    console.log("NOTIFICATION.GET DIPANGGIL");
+    console.log("User ID:", ctx.user?.id);
+    console.log("User Email:", ctx.user?.email);
+
     const db = ctx.db;
 
     const [settings] = await db
@@ -19,6 +23,8 @@ export const notificationRouter = createTRPCRouter({
 
     // If user has no settings yet → create default row
     if (!settings) {
+      console.log("SETTINGS TIDAK ADA. MEMBUAT DEFAULT...");
+
       const [created] = await db
         .insert(userNotificationSettings)
         .values({
@@ -26,7 +32,8 @@ export const notificationRouter = createTRPCRouter({
         })
         .returning();
 
-      // Convert integer → boolean
+      console.log("DEFAULT SETTINGS TERBUAT UNTUK USER:", ctx.user.id);
+
       return {
         ...created,
         emailNotifications: !!created.emailNotifications,
@@ -36,7 +43,8 @@ export const notificationRouter = createTRPCRouter({
       };
     }
 
-    // Convert integer → boolean
+    console.log("SETTINGS DITEMUKAN UNTUK USER:", ctx.user.id);
+
     return {
       ...settings,
       emailNotifications: !!settings.emailNotifications,
@@ -59,6 +67,10 @@ export const notificationRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      console.log("NOTIFICATION.UPDATE DIPANGGIL");
+      console.log("User ID:", ctx.user?.id);
+      console.log("Input Update:", input);
+
       const db = ctx.db;
 
       const payload = {
@@ -74,6 +86,8 @@ export const notificationRouter = createTRPCRouter({
         .set(payload)
         .where(eq(userNotificationSettings.userId, ctx.user.id))
         .returning();
+
+      console.log("SETTINGS BERHASIL DIUPDATE UNTUK USER:", ctx.user.id);
 
       return {
         success: true,
